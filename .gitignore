@@ -1,0 +1,7 @@
+# ignore dependências
+node_modules/
+# lockfiles
+package-lock.json
+yarn.lock
+# logs
+npm-debug.log*
