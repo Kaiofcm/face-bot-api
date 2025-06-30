@@ -1,67 +1,66 @@
-const express = require("express");
-const fileUpload = require("express-fileupload");
-const cors = require("cors");
-const fs = require("fs");
-const path = require("path");
-const faceapi = require("@vladmandic/face-api");
-const canvas = require("canvas");
-require("@tensorflow/tfjs-node"); // <— garante que o back‑end tfjs‑node seja carregado
+import express from 'express';
+import * as faceapi from '@vladmandic/face-api';
+import canvas from 'canvas';
+import path from 'path';
 
-const app = express();
-const PORT = process.env.PORT || 3000;
-
-app.use(cors());
-app.use(fileUpload());
-
+// Patching environment for face-api to use canvas in Node.js
 const { Canvas, Image, ImageData } = canvas;
 faceapi.env.monkeyPatch({ Canvas, Image, ImageData });
 
-const BASE_PATH = path.join(__dirname, "base_faces");
-let labeledDescriptors = [];
+const app = express();
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
 
-// Carrega modelos e base uma única vez
+const MODEL_URL = 'https://unpkg.com/@vladmandic/face-api@1.7.2/model/';
+
+// Inicialização dos modelos
 async function init() {
-  const modelPath = path.join(__dirname, "models");
-await faceapi.nets.ssdMobilenetv1.loadFromDisk('./models');
-await faceapi.nets.faceLandmark68Net.loadFromDisk('./models');
-await faceapi.nets.faceRecognitionNet.loadFromDisk('./models');
-
-
-  const files = fs.readdirSync(BASE_PATH);
-  for (const file of files) {
-    const img = await canvas.loadImage(path.join(BASE_PATH, file));
-    const det = await faceapi
-      .detectSingleFace(img)
-      .withFaceLandmarks()
-      .withFaceDescriptor();
-    if (det) labeledDescriptors.push({ file, descriptor: det.descriptor });
-  }
+  console.log('🔄 Carregando modelos face-api via CDN...');
+  await faceapi.nets.ssdMobilenetv1.loadFromUri(MODEL_URL);
+  await faceapi.nets.faceLandmark68Net.loadFromUri(MODEL_URL);
+  await faceapi.nets.faceRecognitionNet.loadFromUri(MODEL_URL);
+  console.log('✅ Modelos carregados com sucesso!');
 }
 
-// Rota POST /compare
-app.post("/compare", async (req, res) => {
-  if (!req.files || !req.files.image) {
-    return res.status(400).send("No image uploaded");
+// Rota de healthcheck
+app.get('/', (req, res) => {
+  res.send('🚀 Face API Bot rodando!');
+});
+
+// Rota de comparação
+app.post('/compare', async (req, res) => {
+  try {
+    if (!req.files || !req.files.image) {
+      return res.status(400).json({ error: 'Envie o campo "image" com o arquivo.' });
+    }
+
+    const imgBuffer = req.files.image.data;
+    const img = await canvas.loadImage(imgBuffer);
+    const detections = await faceapi
+      .detectAllFaces(img)
+      .withFaceLandmarks()
+      .withFaceDescriptors();
+
+    if (!detections.length) {
+      return res.status(404).json({ error: 'Nenhuma face detectada.' });
+    }
+
+    // Aqui você pode comparar contra uma base de descritores conhecida
+    // Exemplo simples: retorna número de faces detectadas e seus descritores
+    const descriptors = detections.map(det => det.descriptor);
+    res.json({ count: descriptors.length, descriptors });
+  } catch (err) {
+    console.error('❌ Erro na rota /compare:', err);
+    res.status(500).json({ error: 'Erro interno ao processar imagem.' });
   }
-  const imgBuffer = req.files.image.data;
-  const img = await canvas.loadImage(imgBuffer);
-  const det = await faceapi
-    .detectSingleFace(img)
-    .withFaceLandmarks()
-    .withFaceDescriptor();
-  if (!det) return res.status(404).json({ error: "No face detected" });
-
-  const results = labeledDescriptors.map(base => {
-    const dist = faceapi.euclideanDistance(base.descriptor, det.descriptor);
-    return { file: base.file, percent: ((1 - dist) * 100).toFixed(2) };
-  });
-  results.sort((a, b) => b.percent - a.percent);
-  res.json(results.slice(0, 3));
 });
 
-// Inicializa e sobe o servidor
-init().then(() => {
-  app.listen(PORT, () => {
-    console.log(`🔥 Face API running on port ${PORT}`);
+async function start() {
+  await init();
+  const port = process.env.PORT || 3000;
+  app.listen(port, () => {
+    console.log(`🚀 Face API Bot está no ar em http://0.0.0.0:${port}`);
   });
-});
+}
+
+start();
