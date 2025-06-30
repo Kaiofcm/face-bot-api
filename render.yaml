@@ -3,5 +3,5 @@ services:
     name: face-bot-api
     env: node
     buildCommand: npm install
-    startCommand: node server.js
+    startCommand: npm start
     plan: free
