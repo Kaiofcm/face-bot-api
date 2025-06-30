@@ -1,19 +1,17 @@
 import express from 'express';
 import * as faceapi from '@vladmandic/face-api';
 import canvas from 'canvas';
-import path from 'path';
+import multer from 'multer';
 
-// Patching environment for face-api to use canvas in Node.js
+// Monkey‐patch para usar canvas no Node
 const { Canvas, Image, ImageData } = canvas;
 faceapi.env.monkeyPatch({ Canvas, Image, ImageData });
 
 const app = express();
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+const upload = multer(); // sem armazenamento em disco, só buffer
 
 const MODEL_URL = 'https://unpkg.com/@vladmandic/face-api@1.7.2/model/';
 
-// Inicialização dos modelos
 async function init() {
   console.log('🔄 Carregando modelos face-api via CDN...');
   await faceapi.nets.ssdMobilenetv1.loadFromUri(MODEL_URL);
@@ -22,20 +20,19 @@ async function init() {
   console.log('✅ Modelos carregados com sucesso!');
 }
 
-// Rota de healthcheck
 app.get('/', (req, res) => {
   res.send('🚀 Face API Bot rodando!');
 });
 
-// Rota de comparação
-app.post('/compare', async (req, res) => {
+// Rota /compare agora usa multer para ler o arquivo 'image' em req.file
+app.post('/compare', upload.single('image'), async (req, res) => {
   try {
-    if (!req.files || !req.files.image) {
+    if (!req.file) {
       return res.status(400).json({ error: 'Envie o campo "image" com o arquivo.' });
     }
 
-    const imgBuffer = req.files.image.data;
-    const img = await canvas.loadImage(imgBuffer);
+    // req.file.buffer é o buffer binário da imagem
+    const img = await canvas.loadImage(req.file.buffer);
     const detections = await faceapi
       .detectAllFaces(img)
       .withFaceLandmarks()
@@ -45,8 +42,6 @@ app.post('/compare', async (req, res) => {
       return res.status(404).json({ error: 'Nenhuma face detectada.' });
     }
 
-    // Aqui você pode comparar contra uma base de descritores conhecida
-    // Exemplo simples: retorna número de faces detectadas e seus descritores
     const descriptors = detections.map(det => det.descriptor);
     res.json({ count: descriptors.length, descriptors });
   } catch (err) {
